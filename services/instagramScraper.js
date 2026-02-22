@@ -427,7 +427,7 @@ export class InstagramScraper {
         console.log(`[DEBUG] Loaded ${this.seenPks.size} previously seen story IDs`);
       }
 
-      while (storyIndex < maxStories && noContentCount < 3) {
+      while (noContentCount < 3) {
         console.log(`[DEBUG] ===== Story ${storyIndex + 1} =====`);
 
         await this.page.waitForTimeout(1200);
@@ -532,7 +532,7 @@ export class InstagramScraper {
         if (content.mediaUrl) {
           const uniqueId = storyPk || content.mediaUrl;
 
-          if (!this.seenPks.has(uniqueId)) {
+          if (!this.seenPks.has(uniqueId) && storyPk) {
             this.seenPks.add(uniqueId);
             stories.push({
               ig_pk: storyPk,

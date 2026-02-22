@@ -13,6 +13,8 @@ export async function sendToApi(endpoint, data) {
       'Content-Type': 'application/json',
     };
 
+    log(`✓ API request: ${endpoint}: ${data}`);
+
     const response = await fetch(url, {
       method: 'POST',
       headers,
@@ -22,7 +24,7 @@ export async function sendToApi(endpoint, data) {
 
     if (response.status === 200) {
       const result = await response.json();
-      log(`✓ API ${endpoint}: ${result.saved || 0} nuovi, ${result.updated || 0} aggiornati`);
+      log(`✓ API ${endpoint}: ${result.saved || 0} nuovi, ${result.updated || 0} aggiornati, response: ${result}`);
       return { success: true, data: result };
     } else {
       const text = await response.text();

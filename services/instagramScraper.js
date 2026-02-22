@@ -134,9 +134,8 @@ export class InstagramScraper {
       console.log(`[DEBUG] loginFormExists = ${loginFormExists}`);
 
       // Check for "Continue" button (session needs password confirmation)
-      const continueButton = this.page.getByRole('button', { name: /Continue|Continua/i }).or(
-        this.page.locator('button').filter({ hasText: /Continue|Continua/i })
-      );
+      // Use getByLabel which is more specific and uses aria-label
+      const continueButton = this.page.getByLabel('Continue', { exact: true });
       const hasContinueButton = await continueButton.isVisible({ timeout: 2000 }).catch(() => false);
       console.log(`[DEBUG] Has Continue button: ${hasContinueButton}`);
 

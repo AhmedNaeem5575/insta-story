@@ -1,9 +1,6 @@
 # Dependencies
 node_modules/
 
-# Environment variables
-.env
-
 # Session files
 ig-session.json
 ig_session.json

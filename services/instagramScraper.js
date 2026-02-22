@@ -133,11 +133,57 @@ export class InstagramScraper {
       const loginFormExists = await this.page.locator('input[name="email"]').count() > 0;
       console.log(`[DEBUG] loginFormExists = ${loginFormExists}`);
 
-      // Already logged in
-      if (!loginFormExists) {
+      // Check for "Continue" button (session needs password confirmation)
+      const continueButton = this.page.getByRole('button', { name: /Continue|Continua/i }).or(
+        this.page.locator('button').filter({ hasText: /Continue|Continua/i })
+      );
+      const hasContinueButton = await continueButton.isVisible({ timeout: 2000 }).catch(() => false);
+      console.log(`[DEBUG] Has Continue button: ${hasContinueButton}`);
+
+      // Already logged in (no login form, no continue button)
+      if (!loginFormExists && !hasContinueButton) {
         log('✓ Already logged in (active session)');
         this.isLoggedIn = true;
         return true;
+      }
+
+      // Handle "Continue" button scenario
+      if (hasContinueButton) {
+        log('Continue button found - session needs password confirmation');
+        await continueButton.click();
+        log('Clicked Continue button');
+
+        // Wait for password modal
+        await this.page.waitForTimeout(1500);
+
+        // Check for password input in modal
+        const passwordInput = this.page.locator('input[name="password"], input[type="password"], input[name="pass"]');
+        const hasPasswordInput = await passwordInput.count() > 0;
+
+        if (hasPasswordInput) {
+          console.log('[DEBUG] Password input found in modal, filling password...');
+          log('Entering password for session confirmation...');
+
+          await passwordInput.fill(config.igPassword);
+          console.log('[DEBUG] Password filled');
+
+          await this.page.waitForTimeout(500);
+
+          // Press Enter to submit
+          await this.page.keyboard.press('Enter');
+          log('Submitted password');
+
+          // Wait for navigation
+          await this.page.waitForTimeout(3000);
+
+          // Check if we're now logged in
+          const currentUrl = this.page.url();
+          if (!currentUrl.includes('login') && !currentUrl.includes('challenge')) {
+            log('✓ Session confirmed successfully');
+            this.isLoggedIn = true;
+            return true;
+          }
+        }
       }
 
       // Manual login mode

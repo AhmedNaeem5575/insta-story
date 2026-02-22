@@ -454,7 +454,7 @@ export class InstagramScraper {
           log(`Skipping already processed story: ${storyPk}`);
           storyIndex++;
           // Go to next story
-          if (storyIndex < maxStories && noContentCount < 3) {
+          if (noContentCount < 3) {
             try {
               await this.page.keyboard.press('ArrowRight');
               await this.page.waitForTimeout(600);
@@ -559,7 +559,7 @@ export class InstagramScraper {
         storyIndex++;
 
         // Go to next story
-        if (storyIndex < maxStories && noContentCount < 3) {
+        if (noContentCount < 3) {
           try {
             // Tap right side of screen
             await this.page.keyboard.press('ArrowRight')

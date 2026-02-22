@@ -1,0 +1,30 @@
+{
+  "name": "instagram-story-scraper",
+  "version": "1.0.0",
+  "description": "Instagram Stories Scraper - Node.js version with Playwright",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node index.js",
+    "clear-session": "node clear-session.js",
+    "clear-tracker": "node -e \"import('./services/storyTracker.js').then(m => new m.StoryTracker(process.env.IG_TARGET_USERNAME || 'cristiano').clear())\""
+  },
+  "keywords": [
+    "instagram",
+    "scraper",
+    "stories",
+    "playwright"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.48.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0"
+  }
+}

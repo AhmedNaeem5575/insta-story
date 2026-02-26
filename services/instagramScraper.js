@@ -4,7 +4,10 @@ import { log } from '../utils/logger.js';
 import { sendErrorNotification } from '../utils/notifications.js';
 import { SessionManager } from './sessionManager.js';
 import { StoryTracker } from './storyTracker.js';
+import { processStory, isAudioOnly } from './videoProcessor.js';
 import fs from 'fs/promises';
+
+const SERVER_URL = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 3000}`;
 
 /**
  * Instagram Story Scraper using Playwright
@@ -398,10 +401,11 @@ export class InstagramScraper {
 
   /**
    * Extract story data by navigating through all stories
+   * Captures network requests to get real video URLs
    */
   async extractStoryDataFromPage() {
     try {
-      console.log('[DEBUG] Extracting ALL stories...');
+      console.log('[DEBUG] Extracting ALL stories with network interception...');
 
       const currentUrl = this.page.url();
       console.log(`[DEBUG] Current URL: ${currentUrl}`);
@@ -414,10 +418,41 @@ export class InstagramScraper {
       }
 
       const stories = [];
+      const capturedVideos = new Set(); // Video URLs
+      const capturedAudios = new Set(); // Audio URLs
+      const currentStoryMedia = { video: null, audio: null }; // Current story's media
       let storyIndex = 0;
-      const maxStories = 20;
       let noContentCount = 0;
       let lastUrl = '';
+
+      // ── Intercept network requests for media URLs ────────────────────────────────
+      this.page.on('request', (req) => {
+        const url = req.url();
+
+        // Capture Instagram CDN media requests
+        if ((url.includes('fbcdn.net') || url.includes('cdninstagram.com')) && url.includes('.mp4')) {
+          // Remove byte range parameters
+          let cleanUrl = url.replace(/&bytestart=\d+&byteend=\d+/g, '');
+          cleanUrl = cleanUrl.replace(/\?bytestart=\d+&byteend=\d+&/g, '?');
+          cleanUrl = cleanUrl.replace(/\?bytestart=\d+&byteend=\d+/g, '');
+
+          const audioOnly = isAudioOnly(cleanUrl);
+
+          if (audioOnly) {
+            if (!capturedAudios.has(cleanUrl)) {
+              console.log(`[NETWORK] 🎵 Captured AUDIO: ${cleanUrl.substring(0, 60)}...`);
+              capturedAudios.add(cleanUrl);
+              currentStoryMedia.audio = cleanUrl;
+            }
+          } else {
+            if (!capturedVideos.has(cleanUrl)) {
+              console.log(`[NETWORK] 🎬 Captured VIDEO: ${cleanUrl.substring(0, 60)}...`);
+              capturedVideos.add(cleanUrl);
+              currentStoryMedia.video = cleanUrl;
+            }
+          }
+        }
+      });
 
       // Load previously seen story IDs from tracker
       if (this.seenPks.size === 0) {
@@ -430,7 +465,7 @@ export class InstagramScraper {
       while (noContentCount < 3) {
         console.log(`[DEBUG] ===== Story ${storyIndex + 1} =====`);
 
-        await this.page.waitForTimeout(1200);
+        await this.page.waitForTimeout(1500);
 
         const currentUrl2 = this.page.url();
         console.log(`[DEBUG] Current URL: ${currentUrl2}`);
@@ -466,39 +501,23 @@ export class InstagramScraper {
           continue;
         }
 
-        // Extract content
+        // Extract content from DOM
         const content = await this.page.evaluate(() => {
           const result = {
-            mediaUrl: null,
             isVideo: false,
             caption: null,
             link: null,
+            posterUrl: null,
           };
 
           // Check for video
           const videos = Array.from(document.querySelectorAll('video'));
           for (const v of videos) {
             if (v.src && v.offsetParent !== null) {
-              result.mediaUrl = v.src;
               result.isVideo = true;
+              result.posterUrl = v.poster;
               console.log('[EVAL] Found visible video');
               break;
-            }
-          }
-
-          // Check for image
-          if (!result.mediaUrl) {
-            const imgs = Array.from(document.querySelectorAll('img'));
-            for (const img of imgs) {
-              const src = img.src;
-              if (src && !src.includes('64x64') && !src.includes('150x150')) {
-                const rect = img.getBoundingClientRect();
-                if (rect.width >= 200 && rect.height >= 200 && rect.width !== 0) {
-                  result.mediaUrl = src;
-                  console.log('[EVAL] Found story image', rect.width, 'x', rect.height);
-                  break;
-                }
-              }
             }
           }
 
@@ -529,30 +548,88 @@ export class InstagramScraper {
           return result;
         });
 
-        if (content.mediaUrl) {
-          const uniqueId = storyPk || content.mediaUrl;
+        // Get video and audio URLs from captured media
+        const videoUrl = currentStoryMedia.video;
+        const audioUrl = currentStoryMedia.audio;
 
-          if (!this.seenPks.has(uniqueId) && storyPk) {
-            this.seenPks.add(uniqueId);
+        // Reset for next story
+        currentStoryMedia.video = null;
+        currentStoryMedia.audio = null;
+
+        if (videoUrl && storyPk && content.isVideo) {
+          if (!this.seenPks.has(storyPk)) {
+            this.seenPks.add(storyPk);
+
+            // Process video: download video+audio, combine them, save locally
+            console.log(`[DEBUG] Processing video for story ${storyPk}...`);
+            const processResult = await processStory(videoUrl, audioUrl, this.page);
+
+            let finalMediaUrl = videoUrl;
+            let localVideoId = null;
+
+            if (processResult.success) {
+              finalMediaUrl = `${SERVER_URL}${processResult.url}`;
+              localVideoId = processResult.videoId;
+              console.log(`[DEBUG] ✓ Video processed: ${localVideoId}`);
+            } else {
+              console.log(`[DEBUG] ⚠ Video processing failed, using original URL`);
+            }
+
             stories.push({
               ig_pk: storyPk,
               username: config.igTargetUsername,
               caption: content.caption,
-              media_type: content.isVideo ? 2 : 1,
-              is_video: content.isVideo,
+              media_type: 2, // Video
+              is_video: true,
               taken_at: new Date().toISOString(),
               expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-              media_url: content.mediaUrl,
-              thumbnail_url: content.mediaUrl,
-              permalink: storyPk ? `${config.instagramUrl}/stories/${config.igTargetUsername}/${storyPk}/` : null,
+              media_url: finalMediaUrl,
+              original_video_url: videoUrl,
+              original_audio_url: audioUrl,
+              local_video_id: localVideoId,
+              thumbnail_url: content.posterUrl || videoUrl,
+              permalink: `${config.instagramUrl}/stories/${config.igTargetUsername}/${storyPk}/`,
               story_link: content.link,
             });
-            console.log(`[DEBUG] ✓ Story ${storyIndex + 1} extracted (PK: ${storyPk || 'N/A'})`);
+            console.log(`[DEBUG] ✓ Story ${storyIndex + 1} extracted (PK: ${storyPk})`);
+            console.log(`[DEBUG] Media URL: ${finalMediaUrl.substring(0, 80)}...`);
           } else {
             console.log(`[DEBUG] Story already extracted`);
           }
+        } else if (storyPk && !content.isVideo) {
+          // Image story - handle with captured image URL
+          let imageUrl = null;
+
+          // Try to get image from captured media (images)
+          if (capturedVideos.size > 0) {
+            const videoArray = Array.from(capturedVideos);
+            imageUrl = videoArray[videoArray.length - 1];
+          } else if (content.posterUrl && !content.posterUrl.startsWith('blob:')) {
+            imageUrl = content.posterUrl;
+          }
+
+          if (imageUrl && !this.seenPks.has(storyPk)) {
+            this.seenPks.add(storyPk);
+            stories.push({
+              ig_pk: storyPk,
+              username: config.igTargetUsername,
+              caption: content.caption,
+              media_type: 1, // Image
+              is_video: false,
+              taken_at: new Date().toISOString(),
+              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              media_url: imageUrl,
+              thumbnail_url: imageUrl,
+              permalink: `${config.instagramUrl}/stories/${config.igTargetUsername}/${storyPk}/`,
+              story_link: content.link,
+            });
+            console.log(`[DEBUG] ✓ Image story ${storyIndex + 1} extracted (PK: ${storyPk})`);
+          } else {
+            console.log('[DEBUG] No media captured for image story');
+            noContentCount++;
+          }
         } else {
-          console.log('[DEBUG] No content found');
+          console.log('[DEBUG] No media captured or no story PK');
           noContentCount++;
         }
 
@@ -561,8 +638,7 @@ export class InstagramScraper {
         // Go to next story
         if (noContentCount < 3) {
           try {
-            // Tap right side of screen
-            await this.page.keyboard.press('ArrowRight')
+            await this.page.keyboard.press('ArrowRight');
             await this.page.waitForTimeout(600);
           } catch (e) {
             console.log('[DEBUG] Navigation error:', e.message);

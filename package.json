@@ -20,9 +20,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "playwright": "^1.48.0",
     "dotenv": "^16.4.5",
-    "node-fetch": "^3.3.2"
+    "express": "^4.22.1",
+    "node-fetch": "^3.3.2",
+    "playwright": "^1.48.0",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0"

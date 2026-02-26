@@ -8,7 +8,21 @@ import { log } from '../utils/logger.js';
 export class StoryTracker {
   constructor(username) {
     this.username = username;
-    this.trackerFile = path.join(process.cwd(), `stories_tracker.json`);
+    const trackerDir = path.join(process.cwd(), 'story_tracker');
+    this.trackerFile = path.join(trackerDir, `stories_${username}.json`);
+    this.ensureDir();
+  }
+
+  /**
+   * Ensure tracker directory exists
+   */
+  async ensureDir() {
+    const trackerDir = path.join(process.cwd(), 'story_tracker');
+    try {
+      await fs.mkdir(trackerDir, { recursive: true });
+    } catch (error) {
+      // Ignore if directory already exists
+    }
   }
 
   /**

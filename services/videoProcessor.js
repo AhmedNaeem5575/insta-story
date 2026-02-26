@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -22,12 +22,20 @@ async function ensureDirectories() {
  * Check if ffmpeg is installed
  */
 export async function checkFfmpeg() {
-  try {
-    execSync('ffmpeg -version', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  return new Promise((resolve) => {
+    const ffmpeg = spawn('ffmpeg', ['-version'], {
+      stdio: 'ignore',
+      windowsHide: true
+    });
+
+    ffmpeg.on('close', (code) => {
+      resolve(code === 0);
+    });
+
+    ffmpeg.on('error', () => {
+      resolve(false);
+    });
+  });
 }
 
 /**
@@ -169,25 +177,48 @@ export async function processStory(videoUrl, audioUrl, page) {
  * Combine video and audio files using ffmpeg
  */
 async function combineVideoAudio(videoPath, audioPath, outputPath) {
-  const cmd = [
-    'ffmpeg',
-    '-y',
-    '-i', videoPath,
-    '-i', audioPath,
-    '-map', '0:v',
-    '-map', '1:a',
-    '-c:v', 'copy',
-    '-c:a', 'copy',
-    '-shortest',
-    '-fflags', '+genpts',
-    outputPath
-  ];
+  return new Promise((resolve, reject) => {
+    const cmd = [
+      'ffmpeg',
+      '-y',
+      '-i', videoPath,
+      '-i', audioPath,
+      '-map', '0:v',
+      '-map', '1:a',
+      '-c:v', 'copy',
+      '-c:a', 'copy',
+      '-shortest',
+      '-fflags', '+genpts',
+      outputPath
+    ];
 
-  try {
-    execSync(cmd.join(' '), { stdio: 'ignore' });
-  } catch (error) {
-    throw new Error(`ffmpeg failed: ${error.message}`);
-  }
+    log(`   Running ffmpeg...`);
+
+    const ffmpeg = spawn('ffmpeg', cmd.slice(1), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+
+    let stderr = '';
+
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        log(`   ✅ ffmpeg completed successfully`);
+        resolve();
+      } else {
+        log(`   ⚠️  ffmpeg stderr: ${stderr.substring(0, 500)}`);
+        reject(new Error(`ffmpeg failed with exit code ${code}`));
+      }
+    });
+
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`ffmpeg spawn error: ${err.message}`));
+    });
+  });
 }
 
 /**
